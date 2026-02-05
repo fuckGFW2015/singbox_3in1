@@ -26,11 +26,13 @@ error() { echo -e "\033[31m[ERROR]\033[0m $1" >&2; exit 1; }
 # === 1. 环境准备与依赖安装 ===
 check_env() {
     log "检查并安装系统依赖..."
+    # 注意：base64 是 coreutils 的一部分，无需单独安装
+    local pkgs="curl wget openssl tar qrencode iptables iptables-persistent unzip ca-certificates"
     if [ -f /etc/debian_version ]; then
-        apt update >/dev/null
-        apt install -y curl wget openssl tar base64 qrencode iptables iptables-persistent unzip
+        apt update >/dev/null 2>&1
+        DEBIAN_FRONTEND=noninteractive apt install -y $pkgs
     elif [ -f /etc/redhat-release ]; then
-        yum install -y curl wget openssl tar coreutils ca-certificates qrencode iptables iptables-services unzip
+        yum install -y curl wget openssl tar qrencode iptables-services unzip ca-certificates
         systemctl enable --now iptables
     else
         error "不支持的操作系统"
