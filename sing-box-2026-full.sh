@@ -29,25 +29,25 @@ log() { echo -e "\033[32m[INFO]\033[0m $1"; }
 warn() { echo -e "\033[33m[WARN]\033[0m $1"; }
 error() { echo -e "\033[31m[ERROR]\033[0m $1"; exit 1; }
 
-# === 自动获取 sing-box 最新稳定版本（增强版 + 日志安全）===
+# === 自动获取 sing-box 最新稳定版本（安全、健壮、无污染）===
 get_latest_singbox_version() {
   echo -e "\033[32m[INFO]\033[0m 正在从 GitHub 获取 sing-box 最新版本..." >&2
   local latest_tag=""
   local attempt=1
   local max_attempts=3
 
-  while [ $attempt -le $max_attempts ]; do
+  while [ "$attempt" -le "$max_attempts" ]; do
     local api_response
     api_response=$(curl -sL --max-time 10 \
       -H "Accept: application/vnd.github.v3+json" \
       -A "Mozilla/5.0 (sing-box-installer/2026)" \
       https://api.github.com/repos/SagerNet/sing-box/releases/latest)
 
-    if [[ "$api_response" == *"\"tag_name\":"* ]] && \
-       latest_tag=$(echo "$api_response" | grep -o '"tag_name":"[^"]*"' | head -1 | cut -d'"' -f4); then
-
-      if [[ -n "$latest_tag" && "$latest_tag" == v* ]]; then
-        echo "${latest_tag#v}"  # ← 唯一允许的 stdout 输出！
+    # 安全提取 tag_name：只匹配标准 JSON 格式
+    if [ -n "$api_response" ] && latest_tag=$(echo "$api_response" | grep -o '"tag_name":"[^"]*"' | head -n1 | cut -d'"' -f4); then
+      if [ -n "$latest_tag" ] && [ "${latest_tag#v}" != "$latest_tag" ]; then
+        # 确保以 'v' 开头，输出纯版本号（如 1.12.20）
+        echo "${latest_tag#v}"
         return 0
       fi
     fi
