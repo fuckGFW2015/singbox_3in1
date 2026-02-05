@@ -29,27 +29,32 @@ log() { echo -e "\033[32m[INFO]\033[0m $1"; }
 warn() { echo -e "\033[33m[WARN]\033[0m $1"; }
 error() { echo -e "\033[31m[ERROR]\033[0m $1"; exit 1; }
 
-# === 安装 sing-box（兼容无 SHA256 的新版）===
+# === 安装 sing-box（兼容无 SHA256 的新版 + 更强容错）===
 install_singbox() {
   url="https://github.com/SagerNet/sing-box/releases/download/v${SBX_VERSION}/sing-box-${SBX_VERSION}-linux-${ARCH}.tar.gz"
   log "正在下载 sing-box v${SBX_VERSION}..."
-  curl -Lf -o /tmp/sbx.tar.gz "$url"
+  
+  # 下载主文件
+  if ! curl -Lf --retry 3 --retry-delay 2 -o /tmp/sbx.tar.gz "$url"; then
+    error "下载失败：无法获取 sing-box v${SBX_VERSION}（请确认版本号是否正确）"
+  fi
 
   # 尝试下载 SHA256 校验文件（可选）
   sha_url="${url}.sha256sum"
-  if curl -sf -o /tmp/sbx.sha256 "$sha_url" 2>/dev/null; then
+  if curl -sf --max-time 10 -o /tmp/sbx.sha256 "$sha_url" 2>/dev/null; then
     log "验证 SHA256 校验和..."
     (cd /tmp && sha256sum -c sbx.sha256 --status) || error "SHA256 校验失败"
   else
     warn "未找到 SHA256 校验文件，跳过验证（v${SBX_VERSION} 可能不提供）"
   fi
 
-  tar -xzf /tmp/sbx.tar.gz -C /tmp
+  # 解压并安装
+  tar -xzf /tmp/sbx.tar.gz -C /tmp || error "解压失败"
   mkdir -p "$work_dir"
-  mv "/tmp/sing-box-${SBX_VERSION}-linux-${ARCH}/sing-box" "${work_dir}/sing-box"
+  mv "/tmp/sing-box-${SBX_VERSION}-linux-${ARCH}/sing-box" "${work_dir}/sing-box" || error "移动二进制文件失败"
   chmod 755 "${work_dir}/sing-box"
-  rm -rf /tmp/sbx*
-  log "sing-box 安装完成。"
+  rm -rf /tmp/sbx.tar.gz /tmp/sbx.sha256 /tmp/sing-box-${SBX_VERSION}-linux-${ARCH}
+  log "✅ sing-box v${SBX_VERSION} 安装完成。"
 }
 # === 系统检测 ===
 detect_os() {
