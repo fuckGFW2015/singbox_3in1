@@ -1,90 +1,45 @@
 #!/bin/bash
-# 2026 最终版：Reality + Hysteria2 (端口跳跃) + Clash API Dashboard
-# 修复：架构兼容、API 安全、无证书降级、日志安全、服务健壮
-
+# 2026 旗舰版：acme.sh 证书申请 + Reality + Hy2 (端口跳跃) + DashBoard
 set -e
 
-# === 全局参数 ===
 work_dir="/etc/sing-box"
 HY2_PORT_START=20000
 HY2_PORT_END=30000
+ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
 
-# 架构映射（安全）
-ARCH=""
-case "$(uname -m)" in
-  x86_64)   ARCH="amd64" ;;
-  aarch64)  ARCH="arm64" ;;
-  armv7l)   ARCH="armv7" ;;
-  *) echo "❌ 不支持的架构: $(uname -m)"; exit 1 ;;
-esac
+log() { echo -e "\033[32m[INFO]\033[0m $1"; }
+warn() { echo -e "\033[33m[WARN]\033[0m $1"; }
+error() { echo -e "\033[31m[ERROR]\033[0m $1"; exit 1; }
 
-# 日志函数（输出到 stderr，避免污染）
-log() { echo -e "\033[32m[INFO]\033[0m $1" >&2; }
-warn() { echo -e "\033[33m[WARN]\033[0m $1" >&2; }
-error() { echo -e "\033[31m[ERROR]\033[0m $1" >&2; exit 1; }
+# === 1. 证书申请逻辑 (acme.sh) ===
+setup_cert() {
+    read -rp "请输入你的解析域名: " domain
+    [[ -z "$domain" ]] && error "域名不能为空"
 
-# === 1. 环境准备与依赖安装 ===
-check_env() {
-    log "检查并安装系统依赖..."
-    # 注意：base64 是 coreutils 的一部分，无需单独安装
-    local pkgs="curl wget openssl tar qrencode iptables iptables-persistent unzip ca-certificates"
-    if [ -f /etc/debian_version ]; then
-        apt update >/dev/null 2>&1
-        DEBIAN_FRONTEND=noninteractive apt install -y $pkgs
-    elif [ -f /etc/redhat-release ]; then
-        yum install -y curl wget openssl tar qrencode iptables-services unzip ca-certificates
-        systemctl enable --now iptables
+    log "开始部署 acme.sh 并申请证书..."
+    if ! command -v socat >/dev/null; then
+        apt update && apt install -y socat || yum install -y socat
+    fi
+
+    curl https://get.acme.sh | sh -s email=my@example.com
+    alias acme.sh='/root/.acme.sh/acme.sh'
+    
+    # 停止占用 80 端口的服务
+    systemctl stop nginx apache2 2>/dev/null || true
+
+    if /root/.acme.sh/acme.sh --issue -d "$domain" --standalone --keylength ec-256; then
+        /root/.acme.sh/acme.sh --install-cert -d "$domain" --ecc \
+            --fullchain-file "${work_dir}/cert.pem" \
+            --key-file "${work_dir}/key.pem"
+        log "✅ 证书申请成功并安装至 ${work_dir}"
     else
-        error "不支持的操作系统"
+        error "证书申请失败，请检查防火墙是否开启 80 端口或域名解析是否生效"
     fi
 }
 
-# === 2. 安全获取最新版并安装 ===
-install_singbox() {
-    log "正在从 GitHub 获取最新 sing-box 版本..."
-    local api_resp
-    api_resp=$(curl -sL --max-time 10 \
-        -H "Accept: application/vnd.github.v3+json" \
-        -A "Mozilla/5.0 (sing-box-installer)" \
-        https://api.github.com/repos/SagerNet/sing-box/releases/latest)
-
-    # 安全提取版本号
-    local version
-    if [[ "$api_resp" == *"\"tag_name\":"* ]]; then
-        version=$(echo "$api_resp" | grep -o '"tag_name":"[^"]*"' | head -1 | cut -d'"' -f4 | sed 's/v//')
-    fi
-
-    if [ -z "$version" ]; then
-        version="1.12.20"  # 回退到已知稳定版
-        warn "无法获取最新版本，使用回退版本: v$version"
-    fi
-
-    log "正在下载 sing-box v$version..."
-    local url="https://github.com/SagerNet/sing-box/releases/download/v${version}/sing-box-${version}-linux-${ARCH}.tar.gz"
-    wget -qO /tmp/sbx.tar.gz "$url" || error "下载失败，请检查网络或架构支持"
-
-    tar -xzf /tmp/sbx.tar.gz -C /tmp
-    mkdir -p "$work_dir"
-    mv /tmp/sing-box-*/sing-box "${work_dir}/sing-box"
-    chmod 755 "${work_dir}/sing-box"
-    rm -rf /tmp/sbx.tar.gz /tmp/sing-box-*
-    log "✅ sing-box v$version 安装完成"
-}
-
-# === 3. 部署可视化面板 (MetacubexD) ===
-setup_ui() {
-    log "正在部署 MetacubexD 可视化面板..."
-    mkdir -p "${work_dir}/ui"
-    wget -qO /tmp/ui.zip https://github.com/MetaCubeX/MetacubexD/archive/gh-pages.zip
-    unzip -qo /tmp/ui.zip -d /tmp
-    mv /tmp/MetacubexD-gh-pages/* "${work_dir}/ui/"
-    rm -rf /tmp/ui.zip /tmp/MetacubexD-gh-pages
-    log "✅ 面板 UI 部署完成"
-}
-
-# === 4. 内核与网络优化 ===
-optimize_network() {
-    log "正在优化内核网络参数 (BBR & UDP Buffer)..."
+# === 2. 优化内核与防火墙 ===
+optimize_system() {
+    log "优化内核参数..."
     cat > /etc/sysctl.d/99-singbox.conf <<EOF
 net.core.default_qdisc=fq
 net.ipv4.tcp_congestion_control=bbr
@@ -94,27 +49,41 @@ net.core.wmem_max=16777216
 EOF
     sysctl --system >/dev/null 2>&1
 
-    # 端口跳跃：将 20000-30000 跳转到 443
+    log "配置 Hysteria2 端口跳跃..."
     iptables -t nat -F PREROUTING 2>/dev/null || true
     iptables -t nat -A PREROUTING -p udp --dport $HY2_PORT_START:$HY2_PORT_END -j REDIRECT --to-ports 443
-
+    # 存储规则
     if [ -f /etc/debian_version ]; then
-        netfilter-persistent save 2>/dev/null || true
-    elif [ -f /etc/redhat-release ]; then
-        service iptables save 2>/dev/null || true
+        apt install -y iptables-persistent && netfilter-persistent save
     fi
 }
 
-# === 5. 生成配置（仅 Reality，无证书依赖）===
+# === 3. 核心安装逻辑 ===
+install_singbox() {
+    local version=$(curl -s https://api.github.com/repos/SagerNet/sing-box/releases/latest | grep tag_name | cut -d '"' -f 4 | sed 's/v//')
+    log "安装 sing-box v$version..."
+    mkdir -p "$work_dir"
+    wget -qO /tmp/sbx.tar.gz "https://github.com/SagerNet/sing-box/releases/download/v${version}/sing-box-${version}-linux-${ARCH}.tar.gz"
+    tar -xzf /tmp/sbx.tar.gz -C /tmp
+    mv /tmp/sing-box-*/sing-box "${work_dir}/sing-box"
+    chmod 755 "${work_dir}/sing-box"
+    
+    # UI 面板下载
+    mkdir -p "${work_dir}/ui"
+    wget -qO /tmp/ui.zip https://github.com/MetaCubeX/MetacubexD/archive/gh-pages.zip
+    unzip -qo /tmp/ui.zip -d /tmp && mv /tmp/MetacubexD-gh-pages/* "${work_dir}/ui/"
+}
+
+# === 4. 生成配置 ===
 generate_config() {
     local uuid=$(cat /proc/sys/kernel/random/uuid)
+    local hy2_pass=$(tr -dc 'a-zA-Z0-9' < /dev/urandom | head -c 16)
     local secret=$(tr -dc 'a-zA-Z0-9' < /dev/urandom | head -c 12)
     local keypair=$("${work_dir}/sing-box" generate reality-keypair)
     local priv=$(echo "$keypair" | awk '/PrivateKey:/ {print $2}')
     local pub=$(echo "$keypair" | awk '/PublicKey:/ {print $2}')
-    local ip=$(curl -s4 https://ip.sb)
+    local ip=$(curl -s4 ip.sb)
 
-    # 仅启用 Reality（无需证书），Hysteria2 需要 TLS 证书，此处省略以简化
     cat > "${work_dir}/config.json" <<EOF
 {
   "log": { "level": "info" },
@@ -127,23 +96,30 @@ generate_config() {
       "default_mode": "enhanced"
     }
   },
-  "stats": {},
   "inbounds": [
     {
       "type": "vless",
-      "tag": "Reality-In",
+      "tag": "Reality",
       "listen": "::",
       "listen_port": 443,
       "users": [{ "uuid": "$uuid" }],
       "tls": {
         "enabled": true,
-        "server_name": "www.cloudflare.com",
+        "server_name": "www.apple.com",
         "reality": {
           "enabled": true,
-          "handshake": { "server": "www.cloudflare.com", "server_port": 443 },
+          "handshake": { "server": "www.apple.com", "server_port": 443 },
           "private_key": "$priv"
         }
       }
+    },
+    {
+      "type": "hysteria2",
+      "tag": "Hy2",
+      "listen": "::",
+      "listen_port": 443,
+      "users": [{ "password": "$hy2_pass" }],
+      "tls": { "enabled": true, "server_name": "$domain", "cert_path": "${work_dir}/cert.pem", "key_path": "${work_dir}/key.pem" }
     }
   ],
   "outbounds": [{ "type": "direct" }]
@@ -151,23 +127,20 @@ generate_config() {
 EOF
 
     log "========================================"
-    log "🎉 部署成功！"
-    log "🔗 Reality 节点 (VLESS):"
-    log "vless://$uuid@$ip:443?security=reality&pbk=$pub&sni=www.cloudflare.com&fp=chrome&type=tcp#Reality"
-    log "----------------------------------------"
-    log "📊 可视化面板: http://$ip:9090/ui"
-    log "🔑 面板密钥 (Secret): $secret"
-    log "⚠️  注意：Hysteria2 因无有效证书已禁用，如需启用请配置域名和证书"
+    log "✅ 部署完成！"
+    log "域名: $domain"
+    log "VLESS (Reality): vless://$uuid@$ip:443?security=reality&pbk=$pub&sni=www.apple.com&fp=chrome&type=tcp#Reality"
+    log "Hy2 (跳跃端口): $ip:$HY2_PORT_START-$HY2_PORT_END (密码: $hy2_pass)"
+    log "📊 可视化面板: http://$ip:9090/ui (密钥: $secret)"
     log "========================================"
 }
 
-# === 6. 安装 systemd 服务 ===
-install_service() {
+# === 5. 服务启动 ===
+start_service() {
     cat > /etc/systemd/system/sing-box.service <<EOF
 [Unit]
-Description=sing-box service
+Description=sing-box
 After=network.target
-
 [Service]
 ExecStart=${work_dir}/sing-box run -c ${work_dir}/config.json
 Restart=on-failure
@@ -175,25 +148,18 @@ User=root
 WorkingDirectory=${work_dir}
 CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW
 AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW
-LimitNPROC=500
-LimitNOFILE=1000000
-
 [Install]
 WantedBy=multi-user.target
 EOF
-    systemctl daemon-reload
-    systemctl enable --now sing-box
-    log "✅ sing-box 服务已启动"
+    systemctl daemon-reload && systemctl enable --now sing-box
 }
 
-# === 主流程 ===
 main() {
-    check_env
+    setup_cert
     install_singbox
-    setup_ui
-    optimize_network
+    optimize_system
     generate_config
-    install_service
+    start_service
 }
 
 main "$@"
