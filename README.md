@@ -1,6 +1,6 @@
 ### 这个版本所有功能：
 
-5合1：Reality + Hy2 + TUIC5 + Shadowsocks + Argo。
+5合1：Reality + Hy2 + TUIC5 + Argo。
 
 面板下载：自动部署 Yacd-Meta。
 
@@ -14,6 +14,6 @@ wget -O sing-box-2026-full.sh https://raw.githubusercontent.com/fuckGFW2015/sing
 ```
 ##一键卸载
 ```
-bash sing-box-2026-full.sh uninstall
+sudo ./sing-box-2026-full.sh uninstall
 
 ```
