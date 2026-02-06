@@ -49,14 +49,16 @@ install_singbox() {
 
     log "部署 Yacd-Meta 可视化面板..."
     mkdir -p "$work_dir/ui"
-    wget -qO /tmp/yacd.zip https://github.com/MetaCubeX/Yacd-meta/archive/refs/heads/gh-pages.zip || warn "面板下载失败"
+    wget -qO /tmp/yacd.zip https://github.com/MetaCubeX/Yacd-meta/archive/refs/heads/gh-pages.zip || warn "下载面板包失败"
+    
     if [ -f /tmp/yacd.zip ]; then
         unzip -qo /tmp/yacd.zip -d /tmp
         cp -rf /tmp/Yacd-meta-gh-pages/* "$work_dir/ui/" 2>/dev/null || true
         rm -rf /tmp/yacd.zip /tmp/Yacd-meta-gh-pages
+        log "✅ 面板已成功部署至 $work_dir/ui"  # 确保这行存在
+    else
+        error "面板文件缺失，请检查网络后重试" # 如果一定要面板，可以改成 error 强行停止
     fi
-    chown -R sing-box:sing-box "$work_dir"
-}
 
 request_acme_cert() {
     local domain="$1"
