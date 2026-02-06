@@ -46,23 +46,18 @@ install_singbox() {
     mv /tmp/sing-box-*/sing-box "$work_dir/sing-box"
     chmod +x "$work_dir/sing-box"
 
-log "部署 Yacd-Meta 可视化面板..."
+    log "部署 Yacd-Meta 可视化面板..."
     mkdir -p "$work_dir/ui"
-    # 替换为 MetaCubeX 维护的稳定版，这个源已经编译好，解压即用
-    wget -qO /tmp/yacd.zip https://github.com/MetaCubeX/Yacd-meta/archive/refs/heads/gh-pages.zip || warn "面板下载失败，请检查网络"
+    wget -qO /tmp/yacd.zip https://github.com/MetaCubeX/Yacd-meta/archive/refs/heads/gh-pages.zip || warn "面板下载失败"
     
     if [ -f /tmp/yacd.zip ]; then
         unzip -qo /tmp/yacd.zip -d /tmp
-        # 注意：gh-pages 分支解压后的文件夹名是 Yacd-meta-gh-pages
-        # 且文件直接在根目录，不需要进入 dist 文件夹
         cp -rf /tmp/Yacd-meta-gh-pages/* "$work_dir/ui/" 2>/dev/null || true
         log "面板文件部署成功"
         rm -rf /tmp/yacd.zip /tmp/Yacd-meta-gh-pages
-    else
-        warn "未能下载面板，脚本将继续安装核心节点..."
     fi
-    
     chown -R sing-box:sing-box "$work_dir"
+} # <--- 这里刚才漏掉了
 
 # 4. 证书逻辑
 request_acme_cert() {
@@ -88,7 +83,7 @@ request_acme_cert() {
     fi
 }
 
-# 5. 生成配置 (面板锁定 127.0.0.1)
+# 5. 生成配置
 setup_config() {
     read -p "请输入你的解析域名 (Hy2需要): " domain
     [[ -z "$domain" ]] && domain="www.bing.com"
@@ -161,8 +156,7 @@ EOF
 
     clear
     log "========================================"
-    log "🔒 安全模式已启用：面板仅限本地 SSH 隧道访问"
-    log "🌐 访问地址: http://127.0.0.1:9090/ui"
+    log "🔒 安全模式：面板仅限本地访问"
     log "🔑 面板密钥: $secret"
     log "----------------------------------------"
     log "SSH 隧道指令（本地终端执行）:"
@@ -201,4 +195,9 @@ EOF
     fi
 }
 
-prepare_env && create_user && install_singbox && setup_config && setup_argo
+# 顺序运行
+prepare_env
+create_user
+install_singbox
+setup_config
+setup_argo
