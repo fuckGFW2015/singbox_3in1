@@ -67,20 +67,27 @@ install_singbox_and_ui() {
     log "正在安裝最新版 sing-box 核心与 Metacubexd 面板..."
     local arch=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
     local tag=$(curl -s https://api.github.com/repos/SagerNet/sing-box/releases/latest | grep tag_name | cut -d '"' -f 4)
+    
+    # 1. 安装 sing-box 核心
     wget -O /tmp/sb.tar.gz "https://github.com/SagerNet/sing-box/releases/download/$tag/sing-box-${tag#v}-linux-$arch.tar.gz"
     tar -xzf /tmp/sb.tar.gz -C /tmp && mv /tmp/sing-box-*/sing-box "$bin_path"
     chmod +x "$bin_path"
     
-    # --- 修复后的面板安装逻辑 ---
+    # 2. 安装 Metacubexd 面板 (采用更稳妥的目录处理方式)
     mkdir -p "$work_dir/ui"
     wget -O /tmp/ui.zip https://github.com/MetaCubeX/Metacubexd/archive/refs/heads/gh-pages.zip
-    # 使用 -d 指定解压目录，避免目录名大小写不一致的问题
-    unzip -o /tmp/ui.zip -d /tmp/metacubexd_temp
-    cp -rf /tmp/metacubexd_temp/*/* "$work_dir/ui/"
     
-    rm -rf /tmp/ui.zip /tmp/sb.tar.gz /tmp/metacubexd_temp
+    # 创建临时解压目录
+    rm -rf /tmp/metacubexd_temp && mkdir -p /tmp/metacubexd_temp
+    unzip -o /tmp/ui.zip -d /tmp/metacubexd_temp
+    
+    # 这里的关键修复：直接进入解压后的第一级子目录拷贝内容
+    # 因为 GitHub zip 总是包含一个顶级文件夹
+    find /tmp/metacubexd_temp -maxdepth 2 -name "index.html" -exec dirname {} \; | xargs -I {} cp -rf {}/. "$work_dir/ui/"
+    
+    # 3. 彻底清理
+    rm -rf /tmp/ui.zip /tmp/sb.tar.gz /tmp/metacubexd_temp /tmp/sing-box-*
 }
-
 # --- 4. 配置生成與啟動 ---
 setup_config() {
     read -p "請輸入解析域名: " domain
