@@ -14,6 +14,6 @@ wget -O sing-box-2026-full.sh https://raw.githubusercontent.com/fuckGFW2015/sing
 ```
 ##一键卸载
 ```
-sudo ./sing-box-2026-full.sh uninstall
+bash sing-box-2026-full.sh uninstall
 
 ```
