@@ -1,6 +1,6 @@
 #!/bin/bash
 # 2026 最终集成增强版：Reality + Hy2 + TUIC5 + Argo + Yacd-Meta Dashboard
-# 安全修正版：面板仅监听 127.0.0.1，必须通过 SSH 隧道访问
+# 功能：全协议支持 + 防火墙自动打通 + 面板本地安全访问 + 一键卸载
 
 set -e
 work_dir="/etc/sing-box"
@@ -10,7 +10,6 @@ log() { echo -e "\033[32m[INFO]\033[0m $1"; }
 warn() { echo -e "\033[33m[WARN]\033[0m $1"; }
 error() { echo -e "\033[31m[ERROR]\033[0m $1"; exit 1; }
 
-# 1. 环境清理与基础依赖
 # 1. 环境清理、依赖安装及防火墙全开
 prepare_env() {
     log "正在清理冲突环境、安装依赖并放行系统防火墙..."
@@ -18,13 +17,12 @@ prepare_env() {
     # 基础依赖安装
     apt update -q && apt install -y curl wget openssl tar coreutils ca-certificates socat qrencode iptables unzip iptables-persistent net-tools dnsutils -y
 
-    # --- 防火墙放行逻辑开始 ---
-    # 1. 如果有 ufw，直接禁用（最省事）
+    # --- 防火墙放行逻辑 ---
     if command -v ufw >/dev/null; then
         ufw disable >/dev/null 2>&1 || true
     fi
 
-    # 2. 清空 iptables 所有链规则
+    # 重置 iptables 规则，确保流量不被拦截
     iptables -P INPUT ACCEPT
     iptables -P FORWARD ACCEPT
     iptables -P OUTPUT ACCEPT
@@ -35,22 +33,20 @@ prepare_env() {
     iptables -t mangle -F
     iptables -t mangle -X
 
-    # 3. 针对性放行我们要用的端口 (以防万一)
+    # 针对性放行核心端口
     iptables -A INPUT -p tcp --dport 443 -j ACCEPT
     iptables -A INPUT -p udp --dport 443 -j ACCEPT
     iptables -A INPUT -p udp --dport 8443 -j ACCEPT
     iptables -A INPUT -p tcp --dport 9090 -j ACCEPT
     
-    # 4. 永久保存规则（防止重启失效）
+    # 规则持久化
     mkdir -p /etc/iptables
     iptables-save > /etc/iptables/rules.v4
-    # 如果是 IPv6
     if command -v ip6tables >/dev/null; then
         ip6tables -P INPUT ACCEPT
         ip6tables -F
         ip6tables-save > /etc/iptables/rules.v6
     fi
-    # --- 防火墙放行逻辑结束 ---
 
     # 开启 BBR 加速
     if ! grep -q "net.core.default_qdisc=fq" /etc/sysctl.conf; then
@@ -83,6 +79,7 @@ install_singbox() {
 
     log "部署 Yacd-Meta 可视化面板..."
     mkdir -p "$work_dir/ui"
+    # 使用 MetaCubeX 编译好的 gh-pages 分支，确保解压可用
     wget -qO /tmp/yacd.zip https://github.com/MetaCubeX/Yacd-meta/archive/refs/heads/gh-pages.zip || warn "面板下载失败"
     
     if [ -f /tmp/yacd.zip ]; then
@@ -92,7 +89,7 @@ install_singbox() {
         rm -rf /tmp/yacd.zip /tmp/Yacd-meta-gh-pages
     fi
     chown -R sing-box:sing-box "$work_dir"
-} # <--- 这里刚才漏掉了
+}
 
 # 4. 证书逻辑
 request_acme_cert() {
@@ -205,6 +202,7 @@ EOF
     log "========================================"
 }
 
+# 6. Argo 隧道配置
 setup_argo() {
     read -p "配置 Argo 隧道? (y/n): " run_argo
     if [[ "$run_argo" == "y" ]]; then
@@ -230,9 +228,29 @@ EOF
     fi
 }
 
-# 顺序运行
-prepare_env
-create_user
-install_singbox
-setup_config
-setup_argo
+# 7. 卸载逻辑
+uninstall_all() {
+    log "正在启动彻底卸载流程..."
+    systemctl stop sing-box 2>/dev/null || true
+    systemctl disable sing-box 2>/dev/null || true
+    rm -f /etc/systemd/system/sing-box.service
+    systemctl stop cloudflared 2>/dev/null || true
+    systemctl disable cloudflared 2>/dev/null || true
+    if command -v cloudflared >/dev/null; then cloudflared service uninstall 2>/dev/null || true; fi
+    rm -f /usr/local/bin/cloudflared
+    rm -rf "$work_dir" /etc/cloudflared /root/.cloudflared ~/.acme.sh
+    iptables -F && iptables -X && iptables -P INPUT ACCEPT
+    systemctl daemon-reload
+    log "✅ 卸载完成，系统已恢复纯净。"
+}
+
+# 主程序入口
+if [[ "$1" == "uninstall" ]]; then
+    uninstall_all
+else
+    prepare_env
+    create_user
+    install_singbox
+    setup_config
+    setup_argo
+fi
