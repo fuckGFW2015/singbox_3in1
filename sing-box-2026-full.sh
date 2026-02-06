@@ -69,13 +69,18 @@ setup_config() {
     local pub=$(echo "$keypair" | awk '/PublicKey:/ {print $2}')
     local ip=$(curl -s4 ip.sb)
 
-    # 生成自签名证书
+    # 1. 强制确保证书目录权限（防止 sing-box 读取失败）
+    mkdir -p "$work_dir/ui"
+    touch "$work_dir/ui/index.html" # 即使面板下载失败，占位符也能防止报错
     openssl req -x509 -newkey rsa:2048 -keyout "$work_dir/key.pem" -out "$work_dir/cert.pem" -days 3650 -nodes -subj "/CN=$domain" >/dev/null 2>&1
+    chown -R root:root "$work_dir"
 
+    # 2. 写入 JSON (确保格式严谨)
     cat <<EOF > "$work_dir/config.json"
 {
   "log": { "level": "info" },
   "experimental": {
+    "cache_file": { "enabled": true },
     "clash_api": { "external_controller": "127.0.0.1:9090", "external_ui": "ui", "secret": "$secret" }
   },
   "inbounds": [
@@ -87,40 +92,44 @@ setup_config() {
 }
 EOF
 
+    # 3. 语法预检 (这一步最重要，失败会直接停止脚本)
+    log "正在校验 sing-box 配置文件格式..."
+    "$work_dir/sing-box" check -c "$work_dir/config.json" || error "配置文件校验失败！请检查是否有特殊字符。"
+
+    # 4. 写入 Service (保持 User=root)
     cat <<EOF > /etc/systemd/system/sing-box.service
 [Unit]
 Description=sing-box service
 After=network.target
+
 [Service]
 ExecStart=$work_dir/sing-box run -c $work_dir/config.json
 Restart=on-failure
-User=sing-box
-AmbientCapabilities=CAP_NET_BIND_SERVICE
+User=root
+
 [Install]
 WantedBy=multi-user.target
 EOF
 
-    systemctl daemon-reload && systemctl enable --now sing-box
+    # 5. 重启并验证状态
+    systemctl daemon-reload
+    systemctl enable --now sing-box
     
-    # --- 输出展示区 ---
-    echo -e "\n\033[35m========== 节点部署成功 (Ubuntu) ==========\033[0m"
-    log "🔑 面板密钥: $secret"
-    log "🌐 VPS 公网 IP: $ip"
-    
-    log "1️⃣ Reality (TCP 443):"
+    log "等待服务启动..."
+    sleep 3
+    if systemctl is-active --quiet sing-box; then
+        log "✅ 服务已成功在 Ubuntu 上启动并运行！"
+    else
+        warn "❌ 服务未能运行，请执行: journalctl -u sing-box --no-pager -n 20"
+        exit 1
+    fi
+
+    # 6. 生成二维码输出 (Reality)
+    echo -e "\n\033[35m========== 最终配置详情 ==========\033[0m"
     local rel_url="vless://$uuid@$ip:443?security=reality&pbk=$pub&sni=www.apple.com&fp=chrome&type=tcp#Reality_Ubuntu"
-    echo -e "\033[33m$rel_url\033[0m"
-    # 强制生成二维码
+    echo -e "Reality 链接: \033[36m$rel_url\033[0m"
     qrencode -t UTF8 "$rel_url"
-
-    log "2️⃣ Hy2 (UDP 443):"
-    echo -e "\033[33mhysteria2://$pass@$ip:443?sni=$domain&insecure=1#Hy2_Ubuntu\033[0m"
-    
-    log "3️⃣ TUIC5 (UDP 8443):"
-    echo -e "\033[33mtuic://$uuid:$pass@$ip:8443?sni=$domain&alpn=h3&insecure=1#TUIC5_Ubuntu\033[0m"
-    echo -e "\033[35m===========================================\033[0m\n"
 }
-
 uninstall() {
     log "正在卸载并恢复 Ubuntu 网络设置..."
     systemctl stop sing-box || true
