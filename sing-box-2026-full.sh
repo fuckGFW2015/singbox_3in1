@@ -20,20 +20,30 @@ prepare_env() {
 }
 
 install_singbox_and_ui() {
-    log "下载 sing-box 核心..."
+    log "正在下载并解压 sing-box 核心..."
     local arch=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
     local tag=$(curl -s https://api.github.com/repos/SagerNet/sing-box/releases/latest | grep tag_name | cut -d '"' -f 4)
-    wget -qO /tmp/sb.tar.gz "https://github.com/SagerNet/sing-box/releases/download/$tag/sing-box-${tag#v}-linux-$arch.tar.gz"
+    wget -O /tmp/sb.tar.gz "https://github.com/SagerNet/sing-box/releases/download/$tag/sing-box-${tag#v}-linux-$arch.tar.gz"
     tar -xzf /tmp/sb.tar.gz -C /tmp && mv /tmp/sing-box-*/sing-box "$work_dir/sing-box"
     chmod +x "$work_dir/sing-box"
+    log "✅ sing-box 核心安装完成"
 
-    log "部署 Yacd-Meta 可视化面板..."
+    log "正在从 GitHub 获取 Yacd-Meta 面板..."
     mkdir -p "$work_dir/ui"
-    wget -qO /tmp/ui.zip https://github.com/MetaCubeX/Yacd-meta/archive/refs/heads/gh-pages.zip
-    unzip -qo /tmp/ui.zip -d /tmp && cp -rf /tmp/Yacd-meta-gh-pages/* "$work_dir/ui/"
+    # 使用 MetaCubeX 编译好的版本，避免直接下源码
+    wget -O /tmp/ui.zip https://github.com/MetaCubeX/Yacd-meta/archive/refs/heads/gh-pages.zip
+    log "正在解压面板文件..."
+    unzip -o /tmp/ui.zip -d /tmp
+    cp -rf /tmp/Yacd-meta-gh-pages/* "$work_dir/ui/"
+    
+    # 验证安装结果
+    if [ -f "$work_dir/ui/index.html" ]; then
+        log "✅ YACD 面板安装成功！文件已保存至 $work_dir/ui"
+    else
+        error "❌ 面板安装失败，请检查网络连接！"
+    fi
     rm -rf /tmp/ui.zip /tmp/Yacd-meta-gh-pages
 }
-
 setup_config() {
     read -p "请输入解析域名 (Hy2/TUIC用): " domain
     [[ -z "$domain" ]] && domain="www.bing.com"
