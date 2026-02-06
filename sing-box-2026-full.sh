@@ -64,21 +64,21 @@ prepare_env() {
 
 # --- 3. 安裝核心與 Metacubexd 面板 ---
 install_singbox_and_ui() {
-    log "正在安裝最新版 sing-box 核心..."
+    log "正在安裝最新版 sing-box 核心与 Metacubexd 面板..."
     local arch=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
     local tag=$(curl -s https://api.github.com/repos/SagerNet/sing-box/releases/latest | grep tag_name | cut -d '"' -f 4)
-    
     wget -O /tmp/sb.tar.gz "https://github.com/SagerNet/sing-box/releases/download/$tag/sing-box-${tag#v}-linux-$arch.tar.gz"
     tar -xzf /tmp/sb.tar.gz -C /tmp && mv /tmp/sing-box-*/sing-box "$bin_path"
     chmod +x "$bin_path"
     
-    log "正在安裝 Metacubexd 面板..."
+    # --- 修复后的面板安装逻辑 ---
     mkdir -p "$work_dir/ui"
     wget -O /tmp/ui.zip https://github.com/MetaCubeX/Metacubexd/archive/refs/heads/gh-pages.zip
-    unzip -o /tmp/ui.zip -d /tmp && cp -rf /tmp/Metacubexd-gh-pages/* "$work_dir/ui/"
+    # 使用 -d 指定解压目录，避免目录名大小写不一致的问题
+    unzip -o /tmp/ui.zip -d /tmp/metacubexd_temp
+    cp -rf /tmp/metacubexd_temp/*/* "$work_dir/ui/"
     
-    # 清理臨時文件
-    rm -rf /tmp/ui.zip /tmp/sb.tar.gz /tmp/sing-box-* /tmp/Metacubexd-gh-pages
+    rm -rf /tmp/ui.zip /tmp/sb.tar.gz /tmp/metacubexd_temp
 }
 
 # --- 4. 配置生成與啟動 ---
