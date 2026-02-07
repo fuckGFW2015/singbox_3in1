@@ -49,7 +49,7 @@ install_singbox_and_ui() {
 
     log "安裝面板..."
     mkdir -p "$work_dir/ui"
-    wget -O /tmp/ui.zip https://github.com/MetaCubeX/Metacubexd/archive/refs/heads/gh-pages.zip
+    wget -O /tmp/ui.zip https://github.com/MetaCubeX/metacubexd/archive/refs/heads/gh-pages.zip
     unzip -o /tmp/ui.zip -d /tmp/ui_temp
     local real_ui_path=$(find /tmp/ui_temp -name "index.html" | head -n 1 | xargs dirname)
     if [ ! -f "$real_ui_path/index.html" ]; then
@@ -60,8 +60,8 @@ install_singbox_and_ui() {
 }
 
 setup_config() {
-    # === 关键：恢复默认 apple.com，不强制用户输入！===
-    domain="apple.com"
+    # 更推荐的默认域名（微软）
+    domain="www.microsoft.com"
     log "使用默认域名: $domain（适用于 HY2/TUIC）"
     # =============================================
 
@@ -72,13 +72,15 @@ setup_config() {
     local priv=$(echo "$keypair" | awk '/PrivateKey:/ {print $2}')
     local pub=$(echo "$keypair" | awk '/PublicKey:/ {print $2}')
     local short_id=$(openssl rand -hex 4)
-    local ip=$(curl -s4 ip.sb)
+    # ✅ 修正后的 IP 获取逻辑
+    local ip=$(curl -s4m5 ip.sb || curl -s4m5 api.ipify.org)
+    if [[ -z "$ip" ]]; then
+        error "❌ 无法获取服务器公网 IPv4 地址，请检查网络连接"
+    fi
 
     openssl req -x509 -newkey rsa:2048 -keyout "$work_dir/key.pem" -out "$work_dir/cert.pem" \
         -days 3650 -nodes -subj "/CN=$domain" >/dev/null 2>&1
 
-       cat <<EOF > "$work_dir/config.json"
-{
 cat <<EOF > "$work_dir/config.json"
 {
   "log": { "level": "info" },
@@ -113,9 +115,6 @@ cat <<EOF > "$work_dir/config.json"
           "short_id": ["$short_id"]
         }
       }
-    },
-
-EOF
     },
     {
       "type": "hysteria2",
@@ -169,9 +168,9 @@ EOF
     echo -e "\n\033[33m🚀 Reality 節點:\033[0m"
     echo "vless://$uuid@$ip:443?security=reality&encryption=none&pbk=$pub&sni=www.microsoft.com&fp=chrome&shortId=$short_id&type=tcp&flow=xtls-rprx-vision#Reality"
     echo -e "\n\033[33m🚀 Hy2 節點:\033[0m"
-    echo "hysteria2://$pass@$ip:443?sni=apple.com&insecure=1#Hy2"
+    echo "hysteria2://$pass@$ip:443?sni=$domain&insecure=1#Hy2"
     echo -e "\n\033[33m🚀 TUIC5 節點:\033[0m"
-    echo "tuic://$uuid:$pass@$ip:8443?sni=apple.com&alpn=h3&insecure=1#TUIC5"
+    echo "tuic://$uuid:$pass@$ip:8443?sni=$domain&alpn=h3&insecure=1#TUIC5"
     echo -e "\033[35m==============================================================\033[0m\n"
 }
 
