@@ -79,7 +79,10 @@ setup_config() {
 
        cat <<EOF > "$work_dir/config.json"
 {
-  "log": { "level": "warn" },
+ # 替换 Reality 部分
+cat <<EOF > "$work_dir/config.json"
+{
+  "log": { "level": "info" },
   "experimental": {
     "clash_api": {
       "external_controller": "0.0.0.0:9090",
@@ -99,14 +102,17 @@ setup_config() {
       "users": [{ "uuid": "$uuid", "flow": "xtls-rprx-vision" }],
       "tls": {
         "enabled": true,
-        "server_name": "www.apple.com",
+        "server_name": "www.cloudflare.com",
         "reality": {
           "enabled": true,
-          "handshake": { "server": "www.apple.com", "server_port": 443 },
+          "handshake": { "server": "www.cloudflare.com", "server_port": 443 },
           "private_key": "$priv",
           "short_id": ["$short_id"]
         }
       }
+    },
+
+EOF
     },
     {
       "type": "hysteria2",
