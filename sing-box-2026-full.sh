@@ -109,19 +109,18 @@ setup_config() {
       }
     },
     {
-      "type": "hysteria2",
-      "tag": "Hy2-In",
-      "listen": "0.0.0.0",
-      "listen_port": 443,
-      "network": "udp",
-      "users": [{"password": "$pass"}],
-      "tls": {
-        "enabled": true,
-        "server_name": "$domain",
-        "certificate_path": "$work_dir/cert.pem",
-        "key_path": "$work_dir/key.pem"
-      }
-    },
+  "type": "hysteria2",
+  "tag": "Hy2-In",
+  "listen": "0.0.0.0",
+  "listen_port": 443,
+  "users": [{"password": "..."}],
+  "tls": {
+    "enabled": true,
+    "server_name": "apple.com",
+    "certificate_path": "/etc/sing-box/cert.pem",
+    "key_path": "/etc/sing-box/key.pem"
+  }
+}
     {
       "type": "tuic",
       "tag": "TUIC-In",
