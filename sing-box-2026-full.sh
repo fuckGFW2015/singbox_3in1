@@ -77,7 +77,7 @@ setup_config() {
     openssl req -x509 -newkey rsa:2048 -keyout "$work_dir/key.pem" -out "$work_dir/cert.pem" \
         -days 3650 -nodes -subj "/CN=$domain" >/dev/null 2>&1
 
-    cat <<EOF > "$work_dir/config.json"
+       cat <<EOF > "$work_dir/config.json"
 {
   "log": { "level": "warn" },
   "experimental": {
@@ -109,18 +109,18 @@ setup_config() {
       }
     },
     {
-  "type": "hysteria2",
-  "tag": "Hy2-In",
-  "listen": "0.0.0.0",
-  "listen_port": 443,
-  "users": [{"password": "..."}],
-  "tls": {
-    "enabled": true,
-    "server_name": "apple.com",
-    "certificate_path": "/etc/sing-box/cert.pem",
-    "key_path": "/etc/sing-box/key.pem"
-  }
-}
+      "type": "hysteria2",
+      "tag": "Hy2-In",
+      "listen": "0.0.0.0",
+      "listen_port": 443,
+      "users": [{"password": "$pass"}],
+      "tls": {
+        "enabled": true,
+        "server_name": "$domain",
+        "certificate_path": "$work_dir/cert.pem",
+        "key_path": "$work_dir/key.pem"
+      }
+    },
     {
       "type": "tuic",
       "tag": "TUIC-In",
