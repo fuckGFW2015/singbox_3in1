@@ -79,7 +79,6 @@ setup_config() {
 
        cat <<EOF > "$work_dir/config.json"
 {
- # 替换 Reality 部分
 cat <<EOF > "$work_dir/config.json"
 {
   "log": { "level": "info" },
@@ -94,7 +93,7 @@ cat <<EOF > "$work_dir/config.json"
     {
       "type": "vless",
       "tag": "Reality-In",
-      "listen": "0.0.0.0",
+      "listen": "::",
       "listen_port": 443,
       "tcp_fast_open": true,
       "sniff": true,
@@ -102,10 +101,14 @@ cat <<EOF > "$work_dir/config.json"
       "users": [{ "uuid": "$uuid", "flow": "xtls-rprx-vision" }],
       "tls": {
         "enabled": true,
-        "server_name": "www.cloudflare.com",
+        "server_name": "www.microsoft.com",
+        "alpn": ["h2", "http/1.1"],
         "reality": {
           "enabled": true,
-          "handshake": { "server": "www.cloudflare.com", "server_port": 443 },
+          "handshake": {
+            "server": "www.microsoft.com",
+            "server_port": 443
+          },
           "private_key": "$priv",
           "short_id": ["$short_id"]
         }
@@ -164,7 +167,7 @@ EOF
     echo -e "\n\033[35m==============================================================\033[0m"
     log "🔑 面板地址: http://$ip:9090/ui/  密鑰: $secret"
     echo -e "\n\033[33m🚀 Reality 節點:\033[0m"
-    echo "vless://$uuid@$ip:443?security=reality&encryption=none&pbk=$pub&sni=www.apple.com&shortId=$short_id&type=tcp&flow=xtls-rprx-vision#Reality"
+    echo "vless://$uuid@$ip:443?security=reality&encryption=none&pbk=$pub&sni=www.microsoft.com&fp=chrome&shortId=$short_id&type=tcp&flow=xtls-rprx-vision#Reality"
     echo -e "\n\033[33m🚀 Hy2 節點:\033[0m"
     echo "hysteria2://$pass@$ip:443?sni=apple.com&insecure=1#Hy2"
     echo -e "\n\033[33m🚀 TUIC5 節點:\033[0m"
