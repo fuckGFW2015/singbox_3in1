@@ -152,13 +152,13 @@ User=root
 WantedBy=multi-user.target
 EOF
 
-    systemctl daemon-reload && systemctl enable --now sing-box
+      systemctl daemon-reload && systemctl enable --now sing-box
 
     clear
     echo -e "\n\033[35m==============================================================\033[0m"
     log "🔑 面板地址: http://$ip:9090/ui/  密鑰: $secret"
     echo -e "\n\033[33m🚀 Reality 節點:\033[0m"
-    echo "vless://$uuid@$ip:443?security=reality&encryption=none&pbk=$pub&sni=www.apple.com&fp=chrome&shortId=$short_id&type=tcp&flow=xtls-rprx-vision#Reality"
+    echo "vless://$uuid@$ip:443?security=reality&encryption=none&pbk=$pub&sni=www.apple.com&shortId=$short_id&type=tcp&flow=xtls-rprx-vision#Reality"
     echo -e "\n\033[33m🚀 Hy2 節點:\033[0m"
     echo "hysteria2://$pass@$ip:443?sni=apple.com&insecure=1#Hy2"
     echo -e "\n\033[33m🚀 TUIC5 節點:\033[0m"
