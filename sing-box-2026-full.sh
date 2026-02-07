@@ -23,7 +23,7 @@ uninstall() {
 prepare_env() {
     log "配置系统組件..."
     export DEBIAN_FRONTEND=noninteractive
-    apt-get update -y && apt-get install -y curl wget openssl tar qrencode unzip net-tools iptables-persistent
+    apt-get update -y && apt-get install -y curl wget openssl tar qrencode unzip net-tools iptables-persistent file
 
     if ! grep -q "net.ipv4.ip_forward=1" /etc/sysctl.conf; then
         echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
@@ -43,8 +43,25 @@ install_singbox_and_ui() {
     log "下載 sing-box 核心..."
     local arch=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
     local tag=$(curl -s https://api.github.com/repos/SagerNet/sing-box/releases/latest | grep tag_name | cut -d '"' -f 4)
+    
+    # 下载
     wget -O /tmp/sb.tar.gz "https://github.com/SagerNet/sing-box/releases/download/$tag/sing-box-${tag#v}-linux-$arch.tar.gz"
-    tar -xzf /tmp/sb.tar.gz -C /tmp && mv /tmp/sing-box-*/sing-box "$bin_path"
+    
+    # 解压到临时目录
+    mkdir -p /tmp/sb_extract
+    tar -xzf /tmp/sb.tar.gz -C /tmp/sb_extract
+
+    # ✅ 正确处理通配符并验证二进制
+    local -a bins=(/tmp/sb_extract/sing-box-*/sing-box)
+    if [[ ${#bins[@]} -eq 0 ]] || [[ ! -f "${bins[0]}" ]]; then
+        error "❌ 未在压缩包中找到 sing-box 二进制文件！"
+    fi
+
+    if ! file "${bins[0]}" | grep -q "ELF.*executable"; then
+        error "❌ 下載的 sing-box 二進制文件損壞或無效！"
+    fi
+
+    mv "${bins[0]}" "$bin_path"
     chmod +x "$bin_path"
 
     log "安裝面板..."
@@ -56,12 +73,12 @@ install_singbox_and_ui() {
         error "面板文件缺失"
     fi
     cp -rf "$real_ui_path"/* "$work_dir/ui/"
-    rm -rf /tmp/ui.zip /tmp/ui_temp /tmp/sb.tar.gz
+    rm -rf /tmp/ui.zip /tmp/ui_temp /tmp/sb.tar.gz /tmp/sb_extract
 }
 
 setup_config() {
-    # --- SNI 分离策略 ---
-    reality_sni="global.fujifilm.com"
+    # --- SNI 分离策略（使用更稳定的域名）---
+    reality_sni="www.cloudflare.com"      # ✅ 替换为高可用 SNI
     hy2_tuic_sni="www.microsoft.com"
     log "Reality 使用 SNI: $reality_sni"
     log "HY2/TUIC 使用 SNI: $hy2_tuic_sni"
@@ -82,6 +99,12 @@ setup_config() {
     # 仅为 HY2/TUIC 生成自签名证书（CN 必须匹配其 SNI）
     openssl req -x509 -newkey rsa:2048 -keyout "$work_dir/key.pem" -out "$work_dir/cert.pem" \
         -days 3650 -nodes -subj "/CN=$hy2_tuic_sni" >/dev/null 2>&1
+
+    # 彻底清理并重建配置目录
+    rm -rf "$work_dir"
+    mkdir -p "$work_dir"
+    mv "$work_dir/../cert.pem" "$work_dir/" 2>/dev/null || true
+    mv "$work_dir/../key.pem" "$work_dir/" 2>/dev/null || true
 
 cat <<EOF > "$work_dir/config.json"
 {
