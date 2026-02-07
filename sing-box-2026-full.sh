@@ -4,6 +4,10 @@ set -e
 work_dir="/etc/sing-box"
 bin_path="/usr/local/bin/sing-box"
 
+# 全局端口变量
+HY2_PORT=""
+TUIC_PORT=""
+
 log() { echo -e "\033[32m[INFO]\033[0m $1"; }
 error() { echo -e "\033[31m[ERROR]\033[0m $1"; exit 1; }
 
@@ -15,9 +19,16 @@ uninstall() {
     pgrep -x "sing-box" >/dev/null && pkill -9 -x "sing-box" || true
     pgrep -x "cloudflared" >/dev/null && pkill -9 -x "cloudflared" || true
     rm -rf "$work_dir" /etc/systemd/system/sing-box.service "$bin_path"
+    # 清理 iptables 规则（简单粗暴）
+    iptables -F
+    iptables -P INPUT ACCEPT
+    iptables -P FORWARD ACCEPT
+    iptables -P OUTPUT ACCEPT
+    rm -f /etc/iptables/rules.v4
     systemctl daemon-reload >/dev/null 2>&1 || true
     log "✅ 已成功卸载所有组件。"
 }
+
 # ----------------------------------------
 
 prepare_env() {
@@ -30,12 +41,14 @@ prepare_env() {
         sysctl -p >/dev/null 2>&1 || true
     fi
 
+    # 初始化基础规则（HY2/TUIC 端口稍后追加）
     iptables -F
     iptables -A INPUT -p tcp --dport 22 -j ACCEPT
     iptables -A INPUT -p tcp --dport 443 -j ACCEPT   # Reality (TCP)
-    iptables -A INPUT -p udp --dport 4443 -j ACCEPT  # Hysteria2 (UDP)
-    iptables -A INPUT -p udp --dport 8443 -j ACCEPT  # TUIC (UDP)
     iptables -A INPUT -p tcp --dport 9090 -j ACCEPT  # Panel
+    iptables -P INPUT DROP
+    iptables -P FORWARD DROP
+    iptables -P OUTPUT ACCEPT
     iptables-save > /etc/iptables/rules.v4
 }
 
@@ -44,14 +57,10 @@ install_singbox_and_ui() {
     local arch=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
     local tag=$(curl -s https://api.github.com/repos/SagerNet/sing-box/releases/latest | grep tag_name | cut -d '"' -f 4)
     
-    # 下载
     wget -O /tmp/sb.tar.gz "https://github.com/SagerNet/sing-box/releases/download/$tag/sing-box-${tag#v}-linux-$arch.tar.gz"
-    
-    # 解压到临时目录
     mkdir -p /tmp/sb_extract
     tar -xzf /tmp/sb.tar.gz -C /tmp/sb_extract
 
-    # ✅ 正确处理通配符并验证二进制
     local -a bins=(/tmp/sb_extract/sing-box-*/sing-box)
     if [[ ${#bins[@]} -eq 0 ]] || [[ ! -f "${bins[0]}" ]]; then
         error "❌ 未在压缩包中找到 sing-box 二进制文件！"
@@ -79,6 +88,12 @@ install_singbox_and_ui() {
 setup_config() {
     reality_sni="www.cloudflare.com"
     hy2_tuic_sni="one.one.one.one"
+
+    # 随机高端口（避免低端口 QoS）
+    HY2_PORT=$((20000 + RANDOM % 10000))   # 20000-29999
+    TUIC_PORT=$((30000 + RANDOM % 10000))  # 30000-39999
+    log "HY2 端口: $HY2_PORT, TUIC 端口: $TUIC_PORT"
+
     log "Reality 使用 SNI: $reality_sni"
     log "HY2/TUIC 使用 SNI: $hy2_tuic_sni"
 
@@ -95,15 +110,13 @@ setup_config() {
         error "❌ 无法获取服务器公网 IPv4 地址，请检查网络连接"
     fi
 
-    # ✅ 先创建目录
     rm -f "$work_dir/config.json" "$work_dir/cert.pem" "$work_dir/key.pem"
     mkdir -p "$work_dir"
 
-    # ✅ 证书直接生成到目标目录
     openssl req -x509 -newkey rsa:2048 -keyout "$work_dir/key.pem" -out "$work_dir/cert.pem" \
         -days 3650 -nodes -subj "/CN=$hy2_tuic_sni" >/dev/null 2>&1
 
-    # 接下来写 config.json（引用 $work_dir/cert.pem）
+    # 写入配置
     cat <<EOF > "$work_dir/config.json"
 {
   "log": { "level": "info" },
@@ -127,7 +140,7 @@ setup_config() {
       "tls": {
         "enabled": true,
         "server_name": "$reality_sni",
-        "alpn": ["http/1.1"],  // Reality 主要用于 TCP 代理，h2 非必需
+        "alpn": ["http/1.1"],
         "reality": {
           "enabled": true,
           "handshake": {
@@ -143,7 +156,7 @@ setup_config() {
       "type": "hysteria2",
       "tag": "Hy2-In",
       "listen": "0.0.0.0",
-      "listen_port": 4443,
+      "listen_port": $HY2_PORT,
       "users": [{"password": "$pass"}],
       "tls": {
         "enabled": true,
@@ -156,7 +169,7 @@ setup_config() {
       "type": "tuic",
       "tag": "TUIC-In",
       "listen": "0.0.0.0",
-      "listen_port": 8443,
+      "listen_port": $TUIC_PORT,
       "users": [{"uuid": "$uuid", "password": "$pass"}],
       "tls": {
         "enabled": true,
@@ -171,6 +184,12 @@ setup_config() {
 }
 EOF
 
+    # 追加 UDP 端口到防火墙
+    iptables -A INPUT -p udp --dport $HY2_PORT -j ACCEPT
+    iptables -A INPUT -p udp --dport $TUIC_PORT -j ACCEPT
+    iptables-save > /etc/iptables/rules.v4
+
+    # systemd 服务
     cat <<EOF > /etc/systemd/system/sing-box.service
 [Unit]
 Description=sing-box service
@@ -185,16 +204,28 @@ EOF
 
     systemctl daemon-reload && systemctl enable --now sing-box
 
+    # === 生成节点链接 ===
+    reality_link="vless://$uuid@$ip:443?security=reality&encryption=none&pbk=$pub&sni=$reality_sni&fp=chrome&sid=$short_id&type=tcp&flow=xtls-rprx-vision#Reality"
+    hy2_link="hysteria2://$pass@$ip:$HY2_PORT?sni=$hy2_tuic_sni&insecure=1#Hy2"
+    tuic_link="tuic://$uuid:$pass@$ip:$TUIC_PORT?sni=$hy2_tuic_sni&alpn=h3&insecure=1#TUIC5"
+
     clear
     echo -e "\n\033[35m==============================================================\033[0m"
     log "🔑 面板地址: http://$ip:9090/ui/  密鑰: $secret"
-    echo -e "\n\033[33m🚀 Reality 節點:\033[0m"
-    echo "vless://$uuid@$ip:443?security=reality&encryption=none&pbk=$pub&sni=$reality_sni&fp=chrome&sid=$short_id&type=tcp&flow=xtls-rprx-vision#Reality"
-    echo -e "\n\033[33m🚀 Hy2 節點:\033[0m"
-    echo "hysteria2://$pass@$ip:4443?sni=$hy2_tuic_sni&insecure=1#Hy2"
-    echo -e "\n\033[33m🚀 TUIC5 節點:\033[0m"
-    echo "tuic://$uuid:$pass@$ip:8443?sni=$hy2_tuic_sni&alpn=h3&insecure=1#TUIC5"
-    echo -e "\033[35m==============================================================\033[0m\n"
+    echo -e "\n\033[33m🚀 Reality 节点:\033[0m"
+    echo "$reality_link"
+    qrencode -t UTF8 "$reality_link"
+
+    echo -e "\n\033[33m🚀 HY2 节点:\033[0m"
+    echo "$hy2_link"
+    qrencode -t UTF8 "$hy2_link"
+
+    echo -e "\n\033[33m🚀 TUIC5 节点:\033[0m"
+    echo "$tuic_link"
+    qrencode -t UTF8 "$tuic_link"
+
+    echo -e "\n\033[35m==============================================================\033[0m\n"
+    log "📱 请用支持的客户端扫码导入（如 Sing-box、Clash Meta、Mihomo）"
 }
 
 show_menu() {
@@ -205,7 +236,7 @@ show_menu() {
     echo "  2. 彻底卸载"
     echo "  3. 退出"
     echo "------------------------------------------"
-    read -p "选择操作: " num
+    read -p "选择操作: " num </dev/tty
     case "$num" in
         1)
             uninstall
