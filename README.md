@@ -10,7 +10,7 @@
 
 ## 一键安装、卸载、自动清理命令
 ```
-wget -O sing-box-2026-full.sh https://raw.githubusercontent.com/fuckGFW2015/singbox_4in1/refs/heads/main/sing-box-2026-full.sh && chmod +x sing-box-2026-full.sh && sudo ./sing-box-2026-full.sh && rm -f sing-box-2026-full.sh
+curl -fsSL https://raw.githubusercontent.com/fuckGFW2015/singbox_5in1/main/sing-box-2026-full.sh | sudo bash
 
 ```
 
