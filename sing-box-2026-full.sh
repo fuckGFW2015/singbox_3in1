@@ -9,34 +9,37 @@ log() { echo -e "\033[32m[INFO]\033[0m $1"; }
 warn() { echo -e "\033[33m[WARN]\033[0m $1"; }
 error() { echo -e "\033[31m[ERROR]\033[0m $1"; exit 1; }
 
-# --- 1. 优化后的卸载 ---
+# --- 1. 彻底卸载函数 ---
 uninstall() {
     log "正在清理舊環境..."
     systemctl stop sing-box >/dev/null 2>&1 || true
+    systemctl disable sing-box >/dev/null 2>&1 || true
     pkill -9 sing-box >/dev/null 2>&1 || true
     pkill -9 cloudflared >/dev/null 2>&1 || true
     rm -rf "$work_dir" /etc/systemd/system/sing-box.service "$bin_path"
     systemctl daemon-reload >/dev/null 2>&1 || true
+    log "✅ 已成功卸载所有组件。"
 }
 
 # --- 2. 環境準備 ---
 prepare_env() {
-    log "配置 Ubuntu 24.04 防火牆與組件..."
+    log "配置 Ubuntu 24.04 組件..."
     export DEBIAN_FRONTEND=noninteractive
     apt-get update -y && apt-get install -y curl wget openssl tar qrencode unzip net-tools iptables-persistent
     
-    # 開啟內核轉發 (Reality + Hy2 共存關鍵)
-    echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
-    sysctl -p >/dev/null 2>&1 || true
+    # 开启内核转发
+    if ! grep -q "net.ipv4.ip_forward=1" /etc/sysctl.conf; then
+        echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
+        sysctl -p >/dev/null 2>&1 || true
+    fi
 
-    # 清空並配置防火牆
+    # 清空并配置防火墙
     iptables -F
     iptables -A INPUT -p tcp --dport 22 -j ACCEPT
     iptables -A INPUT -p tcp --dport 443 -j ACCEPT
     iptables -A INPUT -p udp --dport 443 -j ACCEPT
-    iptables -A INPUT -p tcp --dport 2053 -j ACCEPT
-    iptables -A INPUT -p udp --dport 8443 -j ACCEPT
     iptables -A INPUT -p tcp --dport 9090 -j ACCEPT
+    iptables -A INPUT -p udp --dport 8443 -j ACCEPT
     iptables-save > /etc/iptables/rules.v4
 }
 
@@ -49,19 +52,18 @@ install_singbox_and_ui() {
     tar -xzf /tmp/sb.tar.gz -C /tmp && mv /tmp/sing-box-*/sing-box "$bin_path"
     chmod +x "$bin_path"
     
-    log "安裝 Metacubexd 面板..."
+    log "安裝面板..."
     mkdir -p "$work_dir/ui"
     wget -O /tmp/ui.zip https://github.com/MetaCubeX/Metacubexd/archive/refs/heads/gh-pages.zip
     unzip -o /tmp/ui.zip -d /tmp/ui_temp
-    # 這裡使用 find 自動尋找 index.html 所在的正確路徑
     local real_ui_path=$(find /tmp/ui_temp -name "index.html" | head -n 1 | xargs dirname)
     cp -rf "$real_ui_path"/* "$work_dir/ui/"
     rm -rf /tmp/ui.zip /tmp/ui_temp /tmp/sb.tar.gz
 }
 
-# --- 4. 配置與啟動 ---
+# --- 4. 核心配置 (修复 Reality 关键点) ---
 setup_config() {
-    read -p "請輸入解析域名: " domain
+    read -p "請輸入解析域名 (默认 apple.com): " domain
     [[ -z "$domain" ]] && domain="apple.com"
     
     local uuid=$(cat /proc/sys/kernel/random/uuid)
@@ -84,10 +86,18 @@ setup_config() {
   "inbounds": [
     {
       "type": "vless",
-      "tag": "Reality-TCP",
+      "tag": "Reality-In",
       "listen": "::",
       "listen_port": 443,
-      "users": [{"uuid": "$uuid"}],
+      "tcp_fast_open": true,
+      "sniff": true,
+      "sniff_override_destination": true,
+      "users": [
+        {
+          "uuid": "$uuid",
+          "flow": "xtls-rprx-vision"
+        }
+      ],
       "tls": {
         "enabled": true,
         "server_name": "www.apple.com",
@@ -101,9 +111,10 @@ setup_config() {
     },
     {
       "type": "hysteria2",
-      "tag": "Hy2-UDP",
+      "tag": "Hy2-In",
       "listen": "::",
       "listen_port": 443,
+      "network": "udp",
       "users": [{"password": "$pass"}],
       "tls": {
         "enabled": true,
@@ -114,7 +125,7 @@ setup_config() {
     },
     {
       "type": "tuic",
-      "tag": "TUIC5",
+      "tag": "TUIC-In",
       "listen": "::",
       "listen_port": 8443,
       "users": [{"uuid": "$uuid", "password": "$pass"}],
@@ -131,7 +142,6 @@ setup_config() {
 }
 EOF
 
-    # 服務寫入
     cat <<EOF > /etc/systemd/system/sing-box.service
 [Unit]
 Description=sing-box service
@@ -149,7 +159,7 @@ EOF
     clear
     echo -e "\n\033[35m==============================================================\033[0m"
     log "🔑 面板地址: http://$ip:9090/ui/  密鑰: $secret"
-    echo -e "\n\033[33m🚀 Reality 節點:\033[0m"
+    echo -e "\n\033[33m🚀 Reality 節點 (修复版):\033[0m"
     echo "vless://$uuid@$ip:443?security=reality&encryption=none&pbk=$pub&sni=www.apple.com&fp=chrome&shortId=$short_id&type=tcp&flow=xtls-rprx-vision#Reality"
     echo -e "\n\033[33m🚀 Hy2 節點:\033[0m"
     echo "hysteria2://$pass@$ip:443?sni=$domain&insecure=1#Hy2"
@@ -158,21 +168,29 @@ EOF
     echo -e "\033[35m==============================================================\033[0m\n"
 }
 
-# --- 5. 核心執行入口 ---
-main() {
-    prepare_env
-    install_singbox_and_ui
-    setup_config
+# --- 5. 交互菜單 ---
+show_menu() {
+    clear
+    echo -e "\033[36m      sing-box 管理脚本 (Reality 修复版)\033[0m"
+    echo "------------------------------------------"
+    echo "  1. 安装 / 重新安装"
+    echo "  2. 彻底卸载"
+    echo "  3. 退出"
+    echo "------------------------------------------"
+    read -p "选择操作: " num
+    case "$num" in
+        1) uninstall; prepare_env; install_singbox_and_ui; setup_config ;;
+        2) uninstall ;;
+        3) exit 0 ;;
+        *) error "无效选择" ;;
+    esac
 }
 
-# --- 6. 命令行入口控制 ---
-case "${1:-}" in
-    uninstall)
-        uninstall
-        log "sing-box 已成功卸载。"
-        exit 0
-        ;;
-    *)
-        main "$@"
-        ;;
-esac
+if [[ $# -gt 0 ]]; then
+    case "${1}" in
+        uninstall) uninstall ;;
+        *) show_menu ;;
+    esac
+else
+    show_menu
+fi
