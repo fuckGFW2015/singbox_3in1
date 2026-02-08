@@ -20,7 +20,7 @@ uninstall() {
     pgrep -x "cloudflared" >/dev/null && pkill -9 -x "cloudflared" || true
     rm -rf "$work_dir" /etc/systemd/system/sing-box.service "$bin_path"
     
-    # 仅重置 filter 表，不碰 nat/mangle
+    # 仅重置 filter 表，保留 nat/mangle
     iptables -F
     iptables -X
     iptables -Z
@@ -44,24 +44,24 @@ prepare_env() {
         sysctl -p >/dev/null 2>&1 || true
     fi
 
-    # 🔥 关键修复：只操作 filter 表，保留 nat/mangle（EIP 依赖它们）
+    # 🔥 关键：只操作 filter 表，保留 nat（EIP 依赖）
     iptables -F
     iptables -X
     iptables -Z
-    iptables -P INPUT ACCEPT    # 先放行，避免 SSH 断连
+    iptables -P INPUT ACCEPT
     iptables -P FORWARD ACCEPT
     iptables -P OUTPUT ACCEPT
 
-    # 添加基础安全规则（允许已建立连接 + 回环）
+    # 基础安全规则
     iptables -A INPUT -i lo -j ACCEPT
     iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
     iptables -A INPUT -p tcp --dport 22 -j ACCEPT   # SSH
     iptables -A INPUT -p tcp --dport 443 -j ACCEPT  # Reality (TCP)
     iptables -A INPUT -p tcp --dport 9090 -j ACCEPT # Panel
-    iptables -A INPUT -j DROP                       # 拒绝其他入站
+    iptables -A INPUT -j DROP
 
-    # 保存规则（不会覆盖 nat 表）
     iptables-save > /etc/iptables/rules.v4
+    systemctl enable --now netfilter-persistent
 }
 
 install_singbox_and_ui() {
@@ -101,13 +101,19 @@ setup_config() {
     reality_sni="www.cloudflare.com"
     hy2_tuic_sni="one.one.one.one"
 
-    # 随机高端口（避免低端口 QoS）
-    HY2_PORT=$((20000 + RANDOM % 10000))   # 20000-29999
-    TUIC_PORT=$((30000 + RANDOM % 10000))  # 30000-39999
-    log "HY2 端口: $HY2_PORT, TUIC 端口: $TUIC_PORT"
+    # 🔥 使用高穿透性 UDP 端口（借鉴旧脚本成功经验）
+    log "正在分配穿透性最佳的 UDP 端口..."
+    hy2_ports=(8443 2053 2087)
+    tuic_ports=(2096 8443 2053)
+    HY2_PORT=${hy2_ports[$((RANDOM % ${#hy2_ports[@]}))]}
+    TUIC_PORT=${tuic_ports[$((RANDOM % ${#tuic_ports[@]}))]}
 
-    log "Reality 使用 SNI: $reality_sni"
-    log "HY2/TUIC 使用 SNI: $hy2_tuic_sni"
+    # 避免端口冲突
+    if [ "$HY2_PORT" = "$TUIC_PORT" ]; then
+        TUIC_PORT=${tuic_ports[$(( (RANDOM + 1) % ${#tuic_ports[@]} ))]}
+    fi
+
+    log "HY2 端口: $HY2_PORT (UDP), TUIC 端口: $TUIC_PORT (UDP)"
 
     local uuid=$(cat /proc/sys/kernel/random/uuid)
     local pass=$(tr -dc 'a-zA-Z0-9' < /dev/urandom | head -c 12)
@@ -125,6 +131,7 @@ setup_config() {
     rm -f "$work_dir/config.json" "$work_dir/cert.pem" "$work_dir/key.pem"
     mkdir -p "$work_dir"
 
+    # 为 HY2/TUIC 生成证书（CN=one.one.one.one）
     openssl req -x509 -newkey rsa:2048 -keyout "$work_dir/key.pem" -out "$work_dir/cert.pem" \
         -days 3650 -nodes -subj "/CN=$hy2_tuic_sni" >/dev/null 2>&1
 
@@ -196,10 +203,11 @@ setup_config() {
 }
 EOF
 
-    # 追加 UDP 端口到防火墙
+    # 添加 UDP 端口到防火墙
     iptables -A INPUT -p udp --dport $HY2_PORT -j ACCEPT
     iptables -A INPUT -p udp --dport $TUIC_PORT -j ACCEPT
     iptables-save > /etc/iptables/rules.v4
+    iptables-restore < /etc/iptables/rules.v4  # 立即生效
 
     # systemd 服务
     cat <<EOF > /etc/systemd/system/sing-box.service
@@ -216,9 +224,9 @@ EOF
 
     systemctl daemon-reload && systemctl enable --now sing-box
 
-    # === 生成节点链接 ===
+    # === 生成完整节点链接（含 alpn=h3 & insecure=1）===
     reality_link="vless://$uuid@$ip:443?security=reality&encryption=none&pbk=$pub&sni=$reality_sni&fp=chrome&sid=$short_id&type=tcp&flow=xtls-rprx-vision#Reality"
-    hy2_link="hysteria2://$pass@$ip:$HY2_PORT?sni=$hy2_tuic_sni&insecure=1#Hy2"
+    hy2_link="hysteria2://$pass@$ip:$HY2_PORT?sni=$hy2_tuic_sni&insecure=1&alpn=h3#Hy2"
     tuic_link="tuic://$uuid:$pass@$ip:$TUIC_PORT?sni=$hy2_tuic_sni&alpn=h3&insecure=1#TUIC5"
 
     clear
@@ -237,7 +245,7 @@ EOF
     qrencode -t UTF8 "$tuic_link"
 
     echo -e "\n\033[35m==============================================================\033[0m\n"
-    log "📱 请用支持的客户端扫码导入（如 Sing-box、Clash Meta、Mihomo）"
+    log "📱 请用支持的客户端扫码导入（如 Sing-box、Clash Meta ≥ v1.12.0、Mihomo）"
 }
 
 show_menu() {
