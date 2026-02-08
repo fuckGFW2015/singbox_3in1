@@ -135,7 +135,7 @@ setup_config() {
   "experimental": {
     "clash_api": {
       "external_controller": "0.0.0.0:9090",
-      "external_ui": "ui",
+      "external_ui": "/ui",
       "secret": "$secret"
     }
   },
