@@ -230,15 +230,15 @@ EOF
     log "🔑 面板地址: http://$ip:9090/ui/  密鑰: $secret"
     echo -e "\n\033[33m🚀 Reality 节点:\033[0m"
     echo "$reality_link"
-    qrencode -t UTF8 "$reality_link"
+    qrencode -t UTF8 "$reality_link" 2>/dev/null
 
     echo -e "\n\033[33m🚀 HY2 节点:\033[0m"
     echo "$hy2_link"
-    qrencode -t UTF8 "$hy2_link"
+    qrencode -t UTF8 "$hy2_link" 2>/dev/null
 
     echo -e "\n\033[33m🚀 TUIC5 节点:\033[0m"
     echo "$tuic_link"
-    qrencode -t UTF8 "$tuic_link"
+    qrencode -t UTF8 "$tuic_link" 2>/dev/null
 
     echo -e "\n\033[35m==============================================================\033[0m\n"
     log "📱 请用支持的客户端扫码导入（如 Sing-box、Clash Meta ≥ v1.12.0、Mihomo）"
