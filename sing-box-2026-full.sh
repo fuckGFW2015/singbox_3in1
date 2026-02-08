@@ -86,16 +86,18 @@ install_singbox_and_ui() {
     mv "${bins[0]}" "$bin_path"
     chmod +x "$bin_path"
 
-    log "安裝面板..."
+    log "安裝 Yacd Meta 面板..."
     mkdir -p "$work_dir/ui"
-    wget -O /tmp/ui.zip https://github.com/MetaCubeX/metacubexd/archive/refs/heads/gh-pages.zip
-    unzip -o /tmp/ui.zip -d /tmp/ui_temp
-    local real_ui_path=$(find /tmp/ui_temp -name "index.html" | head -n 1 | xargs dirname)
-    if [ ! -f "$real_ui_path/index.html" ]; then
-        error "面板文件缺失"
+    wget -O /tmp/yacd-meta.zip https://github.com/MetaCubeX/Yacd-meta/archive/gh-pages.zip
+    unzip -o /tmp/yacd-meta.zip -d /tmp/yacd_temp
+    local yacd_dir="/tmp/yacd_temp/Yacd-meta-gh-pages"
+    if [ ! -f "$yacd_dir/index.html" ]; then
+        error "Yacd Meta 面板文件缺失"
     fi
-    cp -rf "$real_ui_path"/* "$work_dir/ui/"
-    rm -rf /tmp/ui.zip /tmp/ui_temp /tmp/sb.tar.gz /tmp/sb_extract
+    cp -rf "$yacd_dir"/* "$work_dir/ui/"
+    
+    # 清理所有临时文件
+    rm -rf /tmp/sb.tar.gz /tmp/sb_extract /tmp/yacd-meta.zip /tmp/yacd_temp
 }
 
 setup_config() {
