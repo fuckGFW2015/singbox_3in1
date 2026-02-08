@@ -101,43 +101,42 @@ install_singbox_and_ui() {
 }
 
 setup_config() {
+    log "检查端口占用..."
+    local check_ports=(443 9090 8443 2053)
+    for port in "${check_ports[@]}"; do
+        if ss -tuln | grep -q ":$port\b"; then
+            error "端口 $port 已被占用，请先停止相关服务（如 Nginx/Docker）后再运行。"
+        fi
+    done
+
+    # 确保工作目录存在
+    mkdir -p "$work_dir"
+    rm -f "$work_dir/config.json" "$work_dir/cert.pem" "$work_dir/key.pem"
+
     reality_sni="www.cloudflare.com"
     hy2_tuic_sni="one.one.one.one"
-
-    # 🔥 固定使用高穿透性 UDP 端口（不再随机！）
-    HY2_PORT=8443   # Google QUIC 端口，阿里云友好
-    TUIC_PORT=2053  # Cloudflare DoH 端口，穿透性强
-
+    HY2_PORT=8443
+    TUIC_PORT=2053
     log "HY2 端口: $HY2_PORT (UDP), TUIC 端口: $TUIC_PORT (UDP)"
 
-    local uuid=$(cat /proc/sys/kernel/random/uuid)
-    local pass=$(tr -dc 'a-zA-Z0-9' < /dev/urandom | head -c 12)
-    local secret=$(tr -dc 'a-zA-Z0-9' < /dev/urandom | head -c 16)
-    local keypair=$("$bin_path" generate reality-keypair)
-    local priv=$(echo "$keypair" | awk '/PrivateKey:/ {print $2}')
-    local pub=$(echo "$keypair" | awk '/PublicKey:/ {print $2}')
-    local short_id=$(openssl rand -hex 4)
-
+    # ... 后续变量生成、IP 获取、证书、配置写入 ...
     local ip=$(curl -s4m5 ip.sb || curl -s4m5 api.ipify.org)
     if [[ -z "$ip" ]]; then
         error "❌ 无法获取服务器公网 IPv4 地址，请检查网络连接"
     fi
 
-    rm -f "$work_dir/config.json" "$work_dir/cert.pem" "$work_dir/key.pem"
-    mkdir -p "$work_dir"
-
-    # 为 HY2/TUIC 生成证书（CN=one.one.one.one）
+    # 证书生成
     openssl req -x509 -newkey rsa:2048 -keyout "$work_dir/key.pem" -out "$work_dir/cert.pem" \
         -days 3650 -nodes -subj "/CN=$hy2_tuic_sni" >/dev/null 2>&1
 
-    # 写入配置
+    # 配置写入（external_ui 可写 "ui" 或 "/ui"）
     cat <<EOF > "$work_dir/config.json"
 {
   "log": { "level": "info" },
   "experimental": {
     "clash_api": {
       "external_controller": "0.0.0.0:9090",
-      "external_ui": "/ui",
+      "external_ui": "ui",
       "secret": "$secret"
     }
   },
