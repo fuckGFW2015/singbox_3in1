@@ -19,8 +19,11 @@ uninstall() {
     pgrep -x "sing-box" >/dev/null && pkill -9 -x "sing-box" || true
     pgrep -x "cloudflared" >/dev/null && pkill -9 -x "cloudflared" || true
     rm -rf "$work_dir" /etc/systemd/system/sing-box.service "$bin_path"
-    # 清理 iptables 规则（简单粗暴）
+    
+    # 仅重置 filter 表，不碰 nat/mangle
     iptables -F
+    iptables -X
+    iptables -Z
     iptables -P INPUT ACCEPT
     iptables -P FORWARD ACCEPT
     iptables -P OUTPUT ACCEPT
@@ -41,14 +44,23 @@ prepare_env() {
         sysctl -p >/dev/null 2>&1 || true
     fi
 
-    # 初始化基础规则（HY2/TUIC 端口稍后追加）
+    # 🔥 关键修复：只操作 filter 表，保留 nat/mangle（EIP 依赖它们）
     iptables -F
-    iptables -A INPUT -p tcp --dport 22 -j ACCEPT
-    iptables -A INPUT -p tcp --dport 443 -j ACCEPT   # Reality (TCP)
-    iptables -A INPUT -p tcp --dport 9090 -j ACCEPT  # Panel
-    iptables -P INPUT DROP
-    iptables -P FORWARD DROP
+    iptables -X
+    iptables -Z
+    iptables -P INPUT ACCEPT    # 先放行，避免 SSH 断连
+    iptables -P FORWARD ACCEPT
     iptables -P OUTPUT ACCEPT
+
+    # 添加基础安全规则（允许已建立连接 + 回环）
+    iptables -A INPUT -i lo -j ACCEPT
+    iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+    iptables -A INPUT -p tcp --dport 22 -j ACCEPT   # SSH
+    iptables -A INPUT -p tcp --dport 443 -j ACCEPT  # Reality (TCP)
+    iptables -A INPUT -p tcp --dport 9090 -j ACCEPT # Panel
+    iptables -A INPUT -j DROP                       # 拒绝其他入站
+
+    # 保存规则（不会覆盖 nat 表）
     iptables-save > /etc/iptables/rules.v4
 }
 
